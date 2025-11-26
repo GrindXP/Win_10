@@ -155,6 +155,27 @@ jobs:
           cd frp && nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
           sleep 3
 
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Authenticate Tailscale
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          sudo tailscale up --authkey=${TAILSCALE_AUTH_KEY} --accept-routes --accept-dns
+
+      - name: Install xrdp for RDP
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xrdp
+          sudo systemctl enable xrdp
+          sudo systemctl start xrdp
+
+      - name: Allow RDP through firewall (if ufw is enabled)
+        run: |
+          sudo ufw allow 3389/tcp || true
+
       - name: Display Info
         run: |
           echo "╔══════════════════════════════════════════╗"
@@ -163,6 +184,7 @@ jobs:
           echo "║  🔒 Security: Blacklist DISABLED         ║"
           echo "║  📱 Android Studio: Otter 2025.2.1      ║"
           echo "║  💻 OS: Ubuntu 24.04                     ║"
+          echo "║  🔗 Tailscale IP: $(tailscale ip -4)     ║"
           echo "╚══════════════════════════════════════════╝"
 
       - name: Keep Alive
@@ -175,6 +197,7 @@ jobs:
               ~/.vnc/xstartup &
             fi
             pgrep -f "frpc" || (cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &)
+            pgrep -f "tailscale" || sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns
             echo "✅ $(date '+%H:%M:%S') - Active"
             sleep 180
           done
