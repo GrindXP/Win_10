@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 jobs:
-  kde-desktop:
+  xfce-desktop:
     runs-on: ubuntu-24.04
     
     steps:
@@ -19,6 +19,7 @@ jobs:
           sudo chmod 777 /mnt/storage
           mkdir -p /mnt/storage/android-sdk
           mkdir -p /mnt/storage/android-avd
+          mkdir -p /mnt/storage/android-studio
           df -h /mnt
           
       - name: Enable KVM
@@ -29,27 +30,21 @@ jobs:
           sudo chmod 666 /dev/kvm 2>/dev/null || true
           ls -la /dev/kvm
 
-      - name: Install KDE Plasma Desktop
+      - name: Install XFCE Desktop
         run: |
-          echo "Installing KDE Plasma 🎨"
+          echo "Installing XFCE (Lightweight Desktop) 🖥️"
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            kde-plasma-desktop plasma-nm konsole dolphin kate firefox \
-            tigervnc-standalone-server tigervnc-common dbus-x11 \
-            fonts-noto-color-emoji wget curl net-tools htop \
-            openjdk-17-jdk unzip cpu-checker
-          echo "✅ KDE Plasma installed!"
+            xfce4 xfce4-goodies xfce4-terminal \
+            firefox dbus-x11 fonts-noto-color-emoji \
+            wget curl net-tools htop openjdk-17-jdk unzip cpu-checker
+          echo "✅ XFCE installed!"
 
       - name: Configure User
         run: |
           echo "runner:github2024" | sudo chpasswd
-          mkdir -p ~/.config
-          cat > ~/.config/kscreenlockerrc << 'EOF'
-          [Daemon]
-          Autolock=false
-          LockOnResume=false
-          Timeout=0
-          EOF
+          echo "xfce4-session" | tee ~/.xsession
+          chmod 644 ~/.xsession
           echo "✅ User configured"
 
       - name: Install Android SDK
@@ -71,12 +66,11 @@ jobs:
 
       - name: Download Android Studio
         run: |
-          cd /mnt/storage
-          wget -q https://redirectingat.com/?id=1011l528K&xs=1&url=https%3A%2F%2Fdl.google.com%2Fandroid%2Fstudio%2Fide-zips%2F2025.2.1.7%2Fandroid-studio-2025.2.1.7-linux.tar.gz -O android-studio-2025.2.1.7-linux.tar.gz || \
+          cd /mnt/storage/android-studio
           wget -q https://dl.google.com/android/studio/ide-zips/2025.2.1.7/android-studio-2025.2.1.7-linux.tar.gz || exit 0
-          tar -xzf android-studio-*.tar.gz 2>/dev/null || exit 0
+          tar -xzf android-studio-*.tar.gz --strip-components=1 2>/dev/null || exit 0
           rm -f android-studio-*.tar.gz
-          echo "✅ Android Studio Otter 2025.2.1 ready"
+          echo "✅ Android Studio Otter 2025.2.1 ready at /mnt/storage/android-studio"
 
       - name: Setup Environment
         run: |
@@ -85,119 +79,72 @@ jobs:
           export ANDROID_HOME=/mnt/storage/android-sdk
           export ANDROID_SDK_ROOT=/mnt/storage/android-sdk
           export ANDROID_AVD_HOME=/mnt/storage/android-avd
-          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
-          EOF
-
-      - name: Configure VNC
-        run: |
-          mkdir -p ~/.vnc
-          
-          # Create password
-          (echo github2024; echo github2024; echo n) | vncpasswd
-          ls -la ~/.vnc/passwd
-          
-          cat > ~/.vnc/xstartup << 'EOF'
-          #!/bin/bash
-          unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
-          [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && eval $(dbus-launch --sh-syntax)
-          xsetroot -solid "#1e1e2e"
-          [ -f ~/.profile.d/android.sh ] && source ~/.profile.d/android.sh
-          export KDE_SKIP_KSCREENLOCKER=1 XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=KDE
-          startplasma-x11
-          EOF
-          chmod +x ~/.vnc/xstartup
-
-      - name: Start VNC with Security Fix
-        run: |
-          pkill -9 Xtigervnc 2>/dev/null || true
-          rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
-          
-          # Start VNC with blacklist disabled
-          /usr/bin/Xtigervnc :0 \
-            -geometry 1920x1080 \
-            -depth 24 \
-            -rfbport 5900 \
-            -rfbauth ~/.vnc/passwd \
-            -SecurityTypes VncAuth \
-            -UseBlacklist=0 \
-            -BlacklistThreshold=100 \
-            -BlacklistTimeout=1 \
-            -localhost=0 \
-            -AlwaysShared=1 \
-            -desktop "GitHub KDE" &
-          
-          sleep 5
-          
-          # Start desktop
-          export DISPLAY=:0
-          ~/.vnc/xstartup &
-          
-          pgrep -f "Xtigervnc.*:0" || exit 1
-          echo "✅ VNC Started"
-          sudo netstat -tulpn | grep 5900
-
-      - name: Setup FRP
-        run: |
-          wget -q https://github.com/fatedier/frp/releases/download/v0.60.0/frp_0.60.0_linux_amd64.tar.gz
-          tar -xzf frp_*.tar.gz && mv frp_*_linux_amd64 frp
-          
-          cat > frp/frpc.toml << 'EOF'
-          serverAddr = "159.195.6.61"
-          serverPort = 7000
-          [[proxies]]
-          name = "vnc"
-          type = "tcp"
-          localIP = "127.0.0.1"
-          localPort = 5900
-          remotePort = 5900
+          export ANDROID_EMULATOR_HOME=/mnt/storage/android-avd
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:/mnt/storage/android-studio/bin
           EOF
           
-          cd frp && nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
-          sleep 3
-
-      - name: Install Tailscale
-        run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-
-      - name: Authenticate Tailscale
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-        run: |
-          sudo tailscale up --authkey=${TAILSCALE_AUTH_KEY} --accept-routes --accept-dns
+          # Load environment for current session
+          source ~/.profile.d/android.sh
+          
+          # Add to bashrc for persistence
+          echo "source ~/.profile.d/android.sh" >> ~/.bashrc
 
       - name: Install xrdp for RDP
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xrdp
+          sudo adduser xrdp ssl-cert
           sudo systemctl enable xrdp
           sudo systemctl start xrdp
+          echo "✅ xRDP installed and started"
 
-      - name: Allow RDP through firewall (if ufw is enabled)
+      - name: Install Tailscale
         run: |
-          sudo ufw allow 3389/tcp || true
+          curl -fsSL https://tailscale.com/install.sh | sh
+          echo "✅ Tailscale installed"
+
+      - name: Authenticate Tailscale
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          sudo tailscale up --authkey=${TAILSCALE_AUTH_KEY} --accept-routes --accept-dns --ssh
+          sleep 3
+          echo "✅ Tailscale authenticated"
 
       - name: Display Info
         run: |
+          TAILSCALE_IP=$(tailscale ip -4)
           echo "╔══════════════════════════════════════════╗"
-          echo "║  📡 VNC: 159.195.6.61:5900              ║"
+          echo "║  🔗 Tailscale IP: $TAILSCALE_IP    ║"
+          echo "║  🖥️  RDP Port: 3389                      ║"
+          echo "║  👤 Username: runner                     ║"
           echo "║  🔑 Password: github2024                 ║"
-          echo "║  🔒 Security: Blacklist DISABLED         ║"
-          echo "║  📱 Android Studio: Otter 2025.2.1      ║"
-          echo "║  💻 OS: Ubuntu 24.04                     ║"
-          echo "║  🔗 Tailscale IP: $(tailscale ip -4)     ║"
+          echo "║  📱 Android Studio: /mnt/storage/android-studio ║"
+          echo "║  📂 AVD Location: /mnt/storage/android-avd      ║"
+          echo "║  💻 Desktop: XFCE (Lightweight)          ║"
+          echo "║  💾 OS: Ubuntu 24.04                     ║"
           echo "╚══════════════════════════════════════════╝"
+          echo ""
+          echo "Connect via RDP: $TAILSCALE_IP:3389"
+          echo "Access only through Tailscale network"
 
       - name: Keep Alive
         run: |
           while true; do
-            if ! pgrep -f "Xtigervnc.*:0" > /dev/null; then
-              /usr/bin/Xtigervnc :0 -geometry 1920x1080 -depth 24 -rfbport 5900 -rfbauth ~/.vnc/passwd -SecurityTypes VncAuth -UseBlacklist=0 -BlacklistThreshold=100 -BlacklistTimeout=1 -localhost=0 -AlwaysShared=1 -desktop "GitHub KDE" &
-              sleep 3
-              export DISPLAY=:0
-              ~/.vnc/xstartup &
+            # Check xrdp service
+            if ! sudo systemctl is-active --quiet xrdp; then
+              echo "⚠️ xRDP down, restarting..."
+              sudo systemctl restart xrdp
             fi
-            pgrep -f "frpc" || (cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &)
-            pgrep -f "tailscale" || sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns
-            echo "✅ $(date '+%H:%M:%S') - Active"
+            
+            # Check Tailscale
+            if ! pgrep -f "tailscaled" > /dev/null; then
+              echo "⚠️ Tailscale down, restarting..."
+              sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns --ssh
+            fi
+            
+            TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "N/A")
+            echo "✅ $(date '+%H:%M:%S') - Services Active | Tailscale: $TAILSCALE_IP | RDP: 3389"
             sleep 180
           done
+-
